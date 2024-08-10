@@ -8,22 +8,23 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/pprof"
+	"sync"
 
 	"github.com/fogleman/gg"
 )
 
+const SRC = "image.jpg"
 const WIDTH = 1280
 const HEIGHT = 720
+const NUM_WORKERS = 8
+var opts jpeg.Options = jpeg.Options{Quality: 40}
 
-func createFrame(img image.Image, t float64, frameIndex int) error {
+func createFrame(img image.Image, t float64, frameIndex int, errChan chan error) {
 	// Create a new canvas
 	dc := gg.NewContext(WIDTH, HEIGHT)
 
-	// Calculate the x offset
-	x := int(1280 * t)
-
 	// Draw the image onto the canvas
-	dc.DrawImage(img, x, 0)
+	dc.DrawImage(img, int(1280 * t), 0)
 
 	// Define the output path
 	outPath := filepath.Join("frames", fmt.Sprintf("frame_%06d.jpg", frameIndex))
@@ -31,18 +32,15 @@ func createFrame(img image.Image, t float64, frameIndex int) error {
 	// Create the output file
 	outFile, err := os.Create(outPath)
 	if err != nil {
-		return fmt.Errorf("failed to create output file: %v", err)
+		errChan <- fmt.Errorf("failed to create output file: %v", err)
 	}
 	defer outFile.Close()
 
 	// Encode the image as JPEG with quality of 40
-	opts := jpeg.Options{Quality: 40}
 	err = jpeg.Encode(outFile, dc.Image(), &opts)
 	if err != nil {
-		return fmt.Errorf("failed to encode image: %v", err)
+		errChan <- fmt.Errorf("failed to encode image: %v", err)
 	}
-
-	return nil
 }
 
 func main() {
@@ -54,15 +52,9 @@ func main() {
 	defer pprof.StopCPUProfile()
 
 	frames := 1000
-	imagePath := "image.jpg"
-
-	// Ensure the output directory exists
-	if err := os.MkdirAll("frames", os.ModePerm); err != nil {
-		log.Fatalf("failed to create frames directory: %v", err)
-	}
 
 	// Load the image
-	imgFile, err := os.Open(imagePath)
+	imgFile, err := os.Open(SRC)
 	if err != nil {
 		log.Fatalf("failed to open image: %v", err)
 	}
@@ -73,12 +65,29 @@ func main() {
 		log.Fatalf("failed to decode image: %v", err)
 	}
 
+	var wg sync.WaitGroup
+	errChan := make(chan error, frames)
+
+	workerChan := make(chan struct{}, NUM_WORKERS)
+
 	for i := 0; i < frames; i++ {
+		wg.Add(1)
 		t := float64(i) / float64(frames)
 
-		err := createFrame(img, t, i)
-		if err != nil {
-			log.Fatalf("failed to create frame %d: %v", i, err)
-		}
+		workerChan <- struct{}{}
+
+		go func(t float64, i int) {
+			defer func() { <-workerChan }() // Release worker slot
+			defer wg.Done()
+			createFrame(img, t, i, errChan)
+		}(t, i)
+
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	for err := range errChan {
+		log.Println(err)
 	}
 }
