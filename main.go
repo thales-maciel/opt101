@@ -12,23 +12,12 @@ import (
 	"github.com/fogleman/gg"
 )
 
-func createFrame(t float64, imagePath string, frameIndex int) error {
-	// Load the image
-	imgFile, err := os.Open(imagePath)
-	if err != nil {
-		return fmt.Errorf("failed to open image: %v", err)
-	}
-	defer imgFile.Close()
+const WIDTH = 1280
+const HEIGHT = 720
 
-	img, _, err := image.Decode(imgFile)
-	if err != nil {
-		return fmt.Errorf("failed to decode image: %v", err)
-	}
-
+func createFrame(img image.Image, t float64, frameIndex int) error {
 	// Create a new canvas
-	const width = 1280
-	const height = 720
-	dc := gg.NewContext(width, height)
+	dc := gg.NewContext(WIDTH, HEIGHT)
 
 	// Calculate the x offset
 	x := int(1280 * t)
@@ -72,10 +61,22 @@ func main() {
 		log.Fatalf("failed to create frames directory: %v", err)
 	}
 
+	// Load the image
+	imgFile, err := os.Open(imagePath)
+	if err != nil {
+		log.Fatalf("failed to open image: %v", err)
+	}
+	defer imgFile.Close()
+
+	img, _, err := image.Decode(imgFile)
+	if err != nil {
+		log.Fatalf("failed to decode image: %v", err)
+	}
+
 	for i := 0; i < frames; i++ {
 		t := float64(i) / float64(frames)
 
-		err := createFrame(t, imagePath, i)
+		err := createFrame(img, t, i)
 		if err != nil {
 			log.Fatalf("failed to create frame %d: %v", i, err)
 		}
